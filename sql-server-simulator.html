@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SQL Server Simulator</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#EDF0F4;--panel:#FFFFFF;--ink:#1B2733;--muted:#5A6978;--line:#CBD3DB;--accent:#0B5CAD;--accent-ink:#FFFFFF;--head:#E4EAF0;--err:#B3261E;--ok:#1B7A3D;
+  --mono:Consolas,"SF Mono",Menlo,"Courier New",monospace;--sans:"Segoe UI",system-ui,-apple-system,sans-serif;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){color-scheme:dark;--bg:#111A23;--panel:#182430;--ink:#E6EDF3;--muted:#9AABB9;--line:#2B3B4A;--accent:#5AA9F0;--accent-ink:#0C1824;--head:#213243;--err:#FF8A80;--ok:#6FD694}
+}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#111A23;--panel:#182430;--ink:#E6EDF3;--muted:#9AABB9;--line:#2B3B4A;--accent:#5AA9F0;--accent-ink:#0C1824;--head:#213243;--err:#FF8A80;--ok:#6FD694}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+h1{font-size:1.1rem;margin:0}
+.sub{color:var(--muted);font-size:.85rem}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--accent);padding:7px 14px;background:transparent;color:var(--accent);font-weight:600}
+button.run{background:var(--accent);color:var(--accent-ink)}
+.app{display:grid;grid-template-columns:240px 1fr;gap:12px;padding:12px;max-width:1280px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.panel>h2{font-size:.9rem;margin:0;padding:8px 12px;background:var(--head);border-bottom:1px solid var(--line);border-radius:8px 8px 0 0}
+#explorer{padding:8px 12px;font-size:.9rem}
+#explorer details{margin-bottom:6px}
+#explorer summary{cursor:pointer;font-weight:600}
+#explorer ul{margin:4px 0 4px 6px;padding-left:14px;color:var(--muted);font-family:var(--mono);font-size:.82rem}
+#explorer button{padding:2px 8px;font-size:.78rem;margin:2px 0 0 18px}
+.examples{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.examples button{font-size:.8rem;padding:3px 10px;font-weight:500}
+textarea{display:block;width:100%;min-height:170px;border:0;padding:12px;background:var(--panel);color:var(--ink);font:14px/1.5 var(--mono);resize:vertical;border-radius:0}
+.tabs{display:flex;gap:0;border-top:1px solid var(--line)}
+.tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;color:var(--muted);padding:8px 16px}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+#out{padding:10px 12px;min-height:160px;max-height:60vh;overflow:auto}
+.tw{overflow-x:auto;margin-bottom:14px}
+table{border-collapse:collapse;font:13px var(--mono);min-width:100%}
+th,td{border:1px solid var(--line);padding:4px 10px;text-align:left;white-space:nowrap}
+th{background:var(--head)} td.n{color:var(--muted);background:var(--head);text-align:right}
+.null{color:var(--muted);font-style:italic}
+pre{margin:0 0 8px;font:13px/1.5 var(--mono);white-space:pre-wrap}
+.err{color:var(--err)} .ok{color:var(--ok)}
+.status{padding:6px 12px;border-top:1px solid var(--line);color:var(--muted);font-size:.82rem}
+@media (max-width:760px){.app{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>SQL Server Simulator</h1><div class="sub">Eine kleine T-SQL-Übungsumgebung, die komplett im Browser läuft</div></div>
+  <div><button id="reset" type="button">Datenbank zurücksetzen</button> <button class="run" id="run" type="button">▶ Ausführen (F5)</button></div>
+</header>
+<div class="app">
+  <aside class="panel"><h2>Objekt-Explorer</h2><div id="explorer"></div></aside>
+  <main>
+    <div class="panel">
+      <h2>SQLQuery1.sql</h2>
+      <div class="examples" id="ex"></div>
+      <textarea id="sql" spellcheck="false" aria-label="SQL-Abfrage" placeholder="Schreibe hier deine SQL-Abfrage, zum Beispiel CREATE TABLE …"></textarea>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="t1" aria-selected="true">Ergebnisse</button>
+        <button role="tab" id="t2" aria-selected="false">Meldungen</button>
+      </div>
+      <div id="out" aria-live="polite"></div>
+      <div class="status" id="st">Bereit</div>
+    </div>
+  </main>
+</div>
+<script>
+const EXAMPLES={
+ 'Tabelle erstellen':'CREATE TABLE Personen (\n  ID INT PRIMARY KEY,\n  Name VARCHAR(50),\n  Stadt VARCHAR(50)\n);',
+ 'Zeilen einfügen':"INSERT INTO Personen VALUES (1,'Anna','Berlin'),(2,'Ben','Hamburg');",
+ 'Abfragen':'SELECT * FROM Personen;',
+ 'Ändern':"UPDATE Personen SET Stadt = 'München' WHERE ID = 1;\nSELECT * FROM Personen;",
+ 'Tabelle löschen':'DROP TABLE Personen;',
+ 'Prozedur erstellen':'CREATE PROCEDURE PersonenInStadt @Stadt VARCHAR(50)\nAS\nBEGIN\n  SELECT * FROM Personen WHERE Stadt = @Stadt;\nEND',
+ 'Prozedur aufrufen':"EXEC PersonenInStadt @Stadt = 'Berlin';",
+ 'Variablen & IF':"DECLARE @Anzahl INT;\nSET @Anzahl = 3;\nIF @Anzahl > 2\n  PRINT 'Mehr als zwei';\nELSE\n  PRINT 'Zwei oder weniger';"
+};
+let db={},procs={},VARS={},DEPTH=0;
+const KW=['FROM','WHERE','GROUP','ORDER','INNER','JOIN','LEFT','ON','AS','SET','VALUES','OUTER'];
+const strip=s=>s.replace(/^\[|\]$/g,'');
+const eq=(a,b)=>typeof a=='string'&&typeof b=='string'?a.toLowerCase()==b.toLowerCase():a==b;
+function c(a,b){if(a==null||b==null)return a==null?(b==null?0:-1):1;if(typeof a=='string'&&typeof b=='string')return a.localeCompare(b,'de');return a<b?-1:a>b?1:0}
+function cmp(o,a,b){if(a==null||b==null)return false;const r=c(a,b);return o=='='?eq(a,b):o=='<>'||o=='!='?!eq(a,b):o=='<'?r<0:o=='>'?r>0:o=='<='?r<=0:r>=0}
+function tk(s){s=s.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g,m=>m[0]=="'"?m:' ');return s.match(/'(?:[^']|'')*'|\[[^\]]+\]|[A-Za-z_#@][\w.@]*|\d+(?:\.\d+)?|<>|<=|>=|!=|[(),*=<>+\-\/;]/g)||[]}
+function P(t){this.t=t;this.i=0}
+P.prototype={
+ pk(){return this.t[this.i]},
+ u(){const x=this.t[this.i];return x===undefined||x[0]=="'"?'':x.toUpperCase()},
+ nx(){return this.t[this.i++]},
+ is(k){if(this.u()===k){this.i++;return true}return false},
+ need(k){if(!this.is(k))throw new Error('Falsche Syntax in der Nähe von „'+(this.pk()||'Ende der Anweisung')+'“. Erwartet: '+k+'.')},
+ or(){let a=this.and();while(this.is('OR')){const l=a,r=this.and();a=x=>l(x)||r(x)}return a},
+ and(){let a=this.not();while(this.is('AND')){const l=a,r=this.not();a=x=>l(x)&&r(x)}return a},
+ not(){if(this.is('NOT')){const f=this.not();return x=>!f(x)}return this.cm()},
+ cm(){const l=this.add();
+  if(this.is('IS')){const n=this.is('NOT');this.need('NULL');return x=>(l(x)==null)!==n}
+  const n=this.is('NOT');
+  if(this.is('LIKE')){const r=this.add();return x=>{const v=l(x);if(v==null)return false;const re=new RegExp('^'+String(r(x)).replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/%/g,'.*').replace(/_/g,'.')+'$','i');return re.test(v)!==n}}
+  if(this.is('IN')){this.need('(');const a=[];do{a.push(this.add())}while(this.is(','));this.need(')');return x=>a.some(f=>eq(f(x),l(x)))!==n}
+  if(this.is('BETWEEN')){const a=this.add();this.need('AND');const b=this.add();return x=>(c(l(x),a(x))>=0&&c(l(x),b(x))<=0)!==n}
+  const o=this.u();if(['=','<>','!=','<','>','<=','>='].includes(o)){this.i++;const r=this.add();return x=>cmp(o,l(x),r(x))}
+  return l},
+ add(){let a=this.mul();for(;;){const o=this.u();if(o!='+'&&o!='-')return a;this.i++;const l=a,r=this.mul();a=o=='+'?x=>{const p=l(x),q=r(x);return p==null||q==null?null:typeof p=='string'||typeof q=='string'?String(p)+String(q):p+q}:x=>l(x)-r(x)}},
+ mul(){let a=this.prim();for(;;){const o=this.u();if(o!='*'&&o!='/')return a;this.i++;const l=a,r=this.prim();a=o=='*'?x=>l(x)*r(x):x=>{const d=r(x);if(d==0)throw new Error('Fehler beim Dividieren durch Null.');return l(x)/d}}},
+ prim(){const t=this.nx();if(t===undefined)throw new Error('Unerwartetes Ende der Anweisung.');
+  if(t=='('){const e=this.or();this.need(')');return e}
+  if(t=='-'){const f=this.prim();return x=>-f(x)}
+  if(t[0]=="'"){const v=t.slice(1,-1).replace(/''/g,"'");return()=>v}
+  if(/^\d/.test(t)){const v=+t;return()=>v}
+  const U=t.toUpperCase();
+  if(U=='NULL')return()=>null;
+  if(U=='@@VERSION')return()=>'Microsoft SQL Server Simulator (Browser-Version)';
+  if(t[0]=='@'){const vk=t.toLowerCase();return()=>{if(!(vk in VARS))throw new Error('Die Skalarvariable „'+t+'“ muss deklariert werden.');return VARS[vk]}}
+  if(U=='EXISTS'&&this.pk()=='('){this.i++;const r=sel(this);this.need(')');const ex=r.rows.length>0;return()=>ex}
+  if(this.pk()=='('&&['UPPER','LOWER','LEN'].includes(U)){this.i++;const f=this.or();this.need(')');return x=>{const v=f(x);return v==null?null:U=='UPPER'?String(v).toUpperCase():U=='LOWER'?String(v).toLowerCase():String(v).length}}
+  const k=strip(t).toLowerCase();
+  return x=>{if(!(k in x))throw new Error('Ungültiger Spaltenname „'+strip(t)+'“.');return x[k]}},
+ alias(){if(this.is('AS'))return strip(this.nx());const u=this.u();if(/^[A-Z_\[]/.test(u)&&!KW.includes(u)&&u!='HAVING')return strip(this.nx());return null},
+ item(){if(this.pk()=='*'){this.i++;return{star:1}}
+  const U=this.u();
+  if(['COUNT','SUM','AVG','MIN','MAX'].includes(U)&&this.t[this.i+1]=='('){this.i+=2;let f=null;if(this.pk()=='*')this.i++;else f=this.add();this.need(')');return{agg:U,f,name:this.alias()||'(Kein Spaltenname)'}}
+  const s=this.i,f=this.add(),n=this.i-s,raw=this.t[s],al=this.alias();
+  return{f,name:al||(n==1&&/^[A-Za-z_\[]/.test(raw)?strip(raw).split('.').pop():'(Kein Spaltenname)')}},
+ src(){const raw=this.nx();if(!raw)throw new Error('Tabellenname fehlt.');const nm=strip(raw).replace(/^dbo\./i,''),t=db[nm.toLowerCase()];
+  if(!t)throw new Error('Ungültiger Objektname „'+nm+'“.');
+  let al=null;if(this.is('AS'))al=strip(this.nx());else{const u=this.u();if(/^[A-Z_\[]/.test(u)&&!KW.includes(u))al=strip(this.nx())}
+  return{t,al:(al||t.name).toLowerCase(),tn:t.name.toLowerCase()}}
+};
+function pre(r,a){const o={};for(const col of a.t.cols){const k=col.toLowerCase(),v=r?r[k]:null;o[k]=v;o[a.al+'.'+k]=v;o[a.tn+'.'+k]=v}return o}
+function agg(i,g){if(i.agg=='COUNT'&&!i.f)return g.length;const v=g.map(x=>i.f(x)).filter(v=>v!=null);if(i.agg=='COUNT')return v.length;if(!v.length)return null;
+ if(i.agg=='MIN')return v.reduce((a,b)=>c(a,b)<=0?a:b);if(i.agg=='MAX')return v.reduce((a,b)=>c(a,b)>=0?a:b);
+ const s=v.reduce((a,b)=>a+b,0);return i.agg=='SUM'?Math.round(s*1e4)/1e4:Math.round(s/v.length*1e4)/1e4}
+function sel(p){
+ p.need('SELECT');let top=null;if(p.is('TOP'))top=+p.nx();
+ const items=[];do{items.push(p.item())}while(p.is(','));
+ let src=[{}],srcs=[];
+ if(p.is('FROM')){
+  const a=p.src();srcs.push(a);src=a.t.rows.map(r=>pre(r,a));
+  for(;;){let left=false;if(p.is('LEFT')){left=true;p.is('OUTER')}else p.is('INNER');if(!p.is('JOIN'))break;
+   const b=p.src();p.need('ON');const on=p.or(),nr=[];
+   for(const l of src){let m=false;for(const r of b.t.rows){const cx=Object.assign({},l,pre(r,b));if(on(cx)){nr.push(cx);m=true}}if(!m&&left)nr.push(Object.assign({},l,pre(null,b)))}
+   src=nr;srcs.push(b)}}
+ if(p.is('WHERE')){const w=p.or();src=src.filter(w)}
+ const gb=[];if(p.is('GROUP')){p.need('BY');do{gb.push(p.add())}while(p.is(','))}
+ const ob=[];if(p.is('ORDER')){p.need('BY');do{const f=p.add();let d=1;if(p.is('DESC'))d=-1;else p.is('ASC');ob.push({f,d})}while(p.is(','))}
+ let units;
+ if(items.some(i=>i.agg)||gb.length){const m=new Map();for(const x of src){const k=gb.map(f=>f(x)).join('\u0001');if(!m.has(k))m.set(k,[]);m.get(k).push(x)}if(!m.size&&!gb.length)m.set('',[]);units=[...m.values()]}
+ else units=src.map(x=>[x]);
+ const names=[];items.forEach(i=>{if(i.star)srcs.forEach(a=>a.t.cols.forEach(cn=>names.push(cn)));else names.push(i.name)});
+ let recs=units.map(g=>{const x=g[0]||{},out=[];
+  items.forEach(i=>{if(i.star)srcs.forEach(a=>a.t.cols.forEach(cn=>out.push(x[a.al+'.'+cn.toLowerCase()])));else if(i.agg)out.push(agg(i,g));else out.push(i.f(x))});
+  const ctx=Object.assign({},x);names.forEach((n,j)=>ctx[n.toLowerCase()]=out[j]);return{out,ctx}});
+ if(ob.length)recs.sort((a,b)=>{for(const o of ob){const r=c(o.f(a.ctx),o.f(b.ctx));if(r)return r*o.d}return 0});
+ if(top!=null)recs=recs.slice(0,top);
+ return{cols:names,rows:recs.map(r=>r.out)}}
+function exec(tokens){
+ const p=new P(tokens),k=p.u();
+ if(k=='SELECT'){const r=sel(p);return{set:r,msg:'('+r.rows.length+(r.rows.length==1?' Zeile':' Zeilen')+' betroffen)'}}
+ if(k=='INSERT'){p.nx();p.is('INTO');const a=p.src(),t=a.t;let cols=t.cols;
+  if(p.is('(')){cols=[];do{cols.push(strip(p.nx()))}while(p.is(','));p.need(')')}
+  p.need('VALUES');let n=0;
+  do{p.need('(');const v=[];do{v.push(p.add()({}))}while(p.is(','));p.need(')');
+   if(v.length!=cols.length)throw new Error('Die Anzahl der Werte stimmt nicht mit der Anzahl der Spalten überein.');
+   const row={};t.cols.forEach(cn=>row[cn.toLowerCase()]=null);
+   cols.forEach((cn,j)=>{if(!t.cols.some(x=>x.toLowerCase()==cn.toLowerCase()))throw new Error('Ungültiger Spaltenname „'+cn+'“.');row[cn.toLowerCase()]=v[j]});
+   t.rows.push(row);n++}while(p.is(','));
+  return{msg:'('+n+(n==1?' Zeile':' Zeilen')+' betroffen)'}}
+ if(k=='UPDATE'){p.nx();const a=p.src();p.need('SET');const sets=[];
+  do{const cn=strip(p.nx()).split('.').pop().toLowerCase();p.need('=');sets.push([cn,p.add()])}while(p.is(','));
+  const w=p.is('WHERE')?p.or():()=>true;let n=0;
+  for(const r of a.t.rows){const cx=pre(r,a);if(w(cx)){sets.forEach(([cn,f])=>{if(!(cn in r))throw new Error('Ungültiger Spaltenname „'+cn+'“.');r[cn]=f(cx)});n++}}
+  return{msg:'('+n+(n==1?' Zeile':' Zeilen')+' betroffen)'}}
+ if(k=='DELETE'){p.nx();p.is('FROM');const a=p.src(),w=p.is('WHERE')?p.or():()=>true,b=a.t.rows.length;
+  a.t.rows=a.t.rows.filter(r=>!w(pre(r,a)));const n=b-a.t.rows.length;return{msg:'('+n+(n==1?' Zeile':' Zeilen')+' betroffen)'}}
+ if(k=='CREATE'){p.nx();p.need('TABLE');const nm=strip(p.nx()).replace(/^dbo\./i,'');
+  if(db[nm.toLowerCase()])throw new Error('In der Datenbank ist bereits ein Objekt mit dem Namen „'+nm+'“ vorhanden.');
+  p.need('(');const cols=[],types=[];
+  do{cols.push(strip(p.nx()));let d=0,ty=[];while(p.pk()!==undefined){const q=p.pk();if(d==0&&(q==','||q==')'))break;if(q=='(')d++;if(q==')')d--;ty.push(p.nx())}types.push(ty.slice(0,1).concat(ty[1]=='('?ty.slice(1,ty.indexOf(')')+1):[]).join('').toLowerCase())}while(p.is(','));
+  p.need(')');db[nm.toLowerCase()]={name:nm,cols,types,rows:[]};return{msg:'Befehl(e) erfolgreich abgeschlossen.'}}
+ if(k=='DROP'){p.nx();if(p.is('PROCEDURE')||p.is('PROC')){const pn=strip(p.nx()).replace(/^dbo\./i,'').toLowerCase();if(!procs[pn])throw new Error('Die Prozedur „'+pn+'“ kann nicht gelöscht werden, da sie nicht vorhanden ist.');delete procs[pn];return{msg:'Befehl(e) erfolgreich abgeschlossen.'}}p.need('TABLE');let ie=false;if(p.is('IF')){p.need('EXISTS');ie=true}const nm=strip(p.nx()).replace(/^dbo\./i,'').toLowerCase();
+  if(!db[nm]){if(ie)return{msg:'Befehl(e) erfolgreich abgeschlossen.'};return{err:'Meldung 3701, Ebene 11, Status 5\nDas Objekt „'+nm+'“ kann nicht gelöscht werden, da es nicht vorhanden ist.'}}delete db[nm];return{msg:'Befehl(e) erfolgreich abgeschlossen.'}}
+ if(k=='DECLARE'){p.nx();do{const n=p.nx();if(!n||n[0]!='@')throw new Error('Falsche Syntax in der Nähe von „'+(n||'Ende')+'“.');p.is('AS');p.nx();if(p.pk()=='('){let q;do{q=p.nx()}while(q!==')'&&q!==undefined)}VARS[n.toLowerCase()]=p.is('=')?p.add()({}):null}while(p.is(','));return null}
+ if(k=='SET'){p.nx();const n=p.nx();if(n&&/^(NOCOUNT|XACT_ABORT|ANSI_NULLS|QUOTED_IDENTIFIER)$/i.test(n))return null;if(!n||n[0]!='@')throw new Error('Falsche Syntax in der Nähe von „'+(n||'Ende')+'“.');p.need('=');const v=p.or()({}),key=n.toLowerCase();if(!(key in VARS))throw new Error('Die Skalarvariable „'+n+'“ muss deklariert werden.');VARS[key]=v;return null}
+ if(k=='PRINT'){p.nx();const v=p.or()({});return{msg:v==null?'NULL':String(v)}}
+ if(k=='EXEC'||k=='EXECUTE'){p.nx();const nm=strip(p.nx()||'').replace(/^dbo\./i,'').toLowerCase(),pr=procs[nm];
+  if(!pr)throw new Error('Die gespeicherte Prozedur „'+nm+'“ wurde nicht gefunden.');
+  const pos=[],named={};
+  while(p.pk()!==undefined){const a=p.pk();if(a[0]=='@'&&p.t[p.i+1]=='='){p.i+=2;named[a.toLowerCase()]=p.add()({})}else pos.push(p.add()({}));p.is(',');p.is('OUTPUT')}
+  if(pos.length>pr.ps.length)throw new Error('Die Prozedur „'+pr.name+'“ hat zu viele Argumente.');
+  Object.keys(named).forEach(n=>{if(!pr.ps.some(q=>q.n==n))throw new Error('Die Prozedur „'+pr.name+'“ hat keinen Parameter „'+n+'“.')});
+  const nv={};
+  pr.ps.forEach((q,j)=>{let v;if(j<pos.length)v=pos[j];else if(q.n in named)v=named[q.n];else if(q.has)v=q.def({});else throw new Error('Die Prozedur „'+pr.name+'“ erwartet den Parameter „'+q.n+'“, der nicht angegeben wurde.');nv[q.n]=v});
+  if(DEPTH>=16)throw new Error('Die maximale Schachtelungsebene für Prozeduren (16) wurde überschritten.');
+  const old=VARS,res=[];VARS=nv;DEPTH++;
+  try{pr.body.forEach(x=>run(x,res))}catch(e){if(!e.ret){e.partial=res.concat(e.partial||[]);throw e}}finally{VARS=old;DEPTH--}
+  return{multi:res}}
+ if(k=='USE')return{msg:'Datenbankkontext geändert.'};
+ throw new Error('Falsche Syntax in der Nähe von „'+(tokens[0]||'')+'“. Unterstützt: SELECT, INSERT, UPDATE, DELETE, CREATE/DROP TABLE, CREATE/DROP PROCEDURE, EXEC, DECLARE, SET, IF, PRINT.')}
+const STARTS=['BEGIN','SELECT','INSERT','UPDATE','DELETE','PRINT','EXEC','EXECUTE','SET','DECLARE','DROP','CREATE','RETURN','IF'];
+function parseStmts(t,st,blk){
+ const out=[];
+ while(st.i<t.length){
+  const k=t[st.i].toUpperCase();
+  if(k==';'){st.i++;continue}
+  if(k=='END'){if(blk)return out;throw new Error('Falsche Syntax in der Nähe von „END“.')}
+  out.push(parseOne(t,st))}
+ if(blk)throw new Error('Es fehlt ein END für den BEGIN-Block.');
+ return out}
+function parseOne(t,st){
+ if(st.i>=t.length)throw new Error('Unerwartetes Ende der Anweisung.');
+ const k=t[st.i].toUpperCase();
+ if(k=='BEGIN'){st.i++;const b=parseStmts(t,st,true);st.i++;return{k:'blk',b}}
+ if(k=='IF'){st.i++;const s=st.i;let d=0;
+  while(st.i<t.length){const u=t[st.i].toUpperCase();if(u=='(')d++;else if(u==')')d--;else if(d==0&&st.i>s&&STARTS.includes(u))break;st.i++}
+  const ct=t.slice(s,st.i);if(!ct.length)throw new Error('Nach IF fehlt eine Bedingung.');
+  const th=parseOne(t,st);let el=null;
+  while(t[st.i]==';')st.i++;
+  if(st.i<t.length&&t[st.i].toUpperCase()=='ELSE'){st.i++;el=parseOne(t,st)}
+  return{k:'if',ct,th,el}}
+ if(k=='CREATE'&&/^PROC(EDURE)?$/.test((t[st.i+1]||'').toUpperCase())){
+  st.i+=2;const hs=st.i;
+  while(st.i<t.length&&t[st.i].toUpperCase()!='AS')st.i++;
+  if(st.i>=t.length)throw new Error('Falsche Syntax: Nach dem Prozedurkopf fehlt AS.');
+  const h=t.slice(hs,st.i);st.i++;
+  return{k:'proc',h,body:parseStmts(t,st,false)}}
+ const s=st.i;let d=0;
+ while(st.i<t.length){const u=t[st.i].toUpperCase();if(u=='(')d++;else if(u==')')d--;else if(d==0&&(u==';'||u=='ELSE'||u=='END'))break;st.i++}
+ if(st.i==s)throw new Error('Falsche Syntax in der Nähe von „'+t[s]+'“.');
+ return{k:'st',t:t.slice(s,st.i)}}
+function run(n,out){
+ if(n.k=='blk')n.b.forEach(x=>run(x,out));
+ else if(n.k=='if'){const v=new P(n.ct).or()({});if(v)run(n.th,out);else if(n.el)run(n.el,out)}
+ else if(n.k=='proc'){
+  const p=new P(n.h),nm=strip(p.nx()).replace(/^dbo\./i,'');
+  if(procs[nm.toLowerCase()])throw new Error('In der Datenbank ist bereits ein Objekt mit dem Namen „'+nm+'“ vorhanden.');
+  const ps=[];
+  while(p.pk()!==undefined){const pn=p.nx();if(pn[0]!='@')throw new Error('Falsche Syntax in der Nähe von „'+pn+'“. Parametername mit @ erwartet.');
+   p.nx();if(p.pk()=='('){let q;do{q=p.nx()}while(q!==')'&&q!==undefined)}
+   let def=null,has=false;if(p.is('=')){def=p.add();has=true}
+   p.is('OUTPUT');p.is(',');ps.push({n:pn.toLowerCase(),def,has})}
+  procs[nm.toLowerCase()]={name:nm,ps,body:n.body};out.push({msg:'Befehl(e) erfolgreich abgeschlossen.'})}
+ else if(n.t[0].toUpperCase()=='RETURN')throw{ret:1};
+ else{const r=exec(n.t);if(r){if(r.multi)out.push(...r.multi);else out.push(r)}}}
+function runScript(sql){
+ const res=[],bs=[];let cur=[];
+ for(const t of tk(sql)){if(t.toUpperCase()=='GO'){if(cur.length)bs.push(cur);cur=[]}else cur.push(t)}
+ if(cur.length)bs.push(cur);
+ for(const b of bs){
+  VARS={};DEPTH=0;const out=[];let bad=false;
+  try{for(const n of parseStmts(b,{i:0},false))run(n,out)}
+  catch(e){if(!e.ret){bad=true;if(e.partial)out.push(...e.partial);out.push({fatal:true,err:'Meldung 102, Ebene 15, Status 1\n'+e.message})}}
+  res.push(...out);
+  if(bad)break}
+ if(!res.length)res.push({msg:'Befehl(e) erfolgreich abgeschlossen.'});
+ return res}
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+let last=[],tab=1;
+function show(){
+ const o=$('out');
+ if(tab==1){const sets=last.filter(r=>r.set);o.innerHTML=sets.length?sets.map(r=>{
+  const rows=r.set.rows.slice(0,500);
+  return '<div class="tw"><table><thead><tr><th></th>'+r.set.cols.map(h=>'<th>'+esc(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.map((x,i)=>'<tr><td class="n">'+(i+1)+'</td>'+x.map(v=>'<td>'+(v==null?'<span class="null">NULL</span>':esc(v))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}).join(''):'<pre class="sub">Keine Ergebnismenge. Siehe Registerkarte „Meldungen“.</pre>'}
+ else o.innerHTML=last.map(r=>r.err?'<pre class="err">'+esc(r.err)+'</pre>':'<pre>'+esc(r.msg)+'</pre>').join('')+(last.some(r=>r.err)?'<pre class="err">Fertigstellungszeit: '+new Date().toLocaleTimeString('de-DE')+'</pre>':'<pre class="ok">Fertigstellungszeit: '+new Date().toLocaleTimeString('de-DE')+'</pre>');
+ $('t1').setAttribute('aria-selected',tab==1);$('t2').setAttribute('aria-selected',tab==2)}
+function explorer(){
+ const T=Object.values(db).map(t=>'<details><summary>dbo.'+esc(t.name)+'</summary><ul>'+t.cols.map((cn,i)=>'<li>'+esc(cn)+' ('+esc(t.types[i]||'')+')</li>').join('')+'</ul><button type="button" data-t="'+esc(t.name)+'">SELECT *</button></details>').join('')||'<span class="sub">Keine Tabellen vorhanden.</span>';
+ const R=Object.values(procs).map(q=>'<details><summary>dbo.'+esc(q.name)+'</summary><ul>'+(q.ps.length?q.ps.map(a=>'<li>'+esc(a.n)+'</li>').join(''):'<li>(keine Parameter)</li>')+'</ul><button type="button" data-p="'+esc(q.name)+'">EXEC</button></details>').join('')||'<span class="sub">Keine Prozeduren vorhanden.</span>';
+ $('explorer').innerHTML='<div class="sub"><b>Tabellen</b></div>'+T+'<div class="sub" style="margin-top:10px"><b>Gespeicherte Prozeduren</b></div>'+R}
+function go(){
+ const t0=performance.now();last=runScript($('sql').value);
+ const err=last.some(r=>r.err),fatal=last.some(r=>r.fatal);tab=!fatal&&last.some(r=>r.set)?1:2;show();explorer();
+ $('st').textContent=(err?'Abfrage mit Fehlern abgeschlossen':'Abfrage erfolgreich ausgeführt')+' · '+Math.max(1,Math.round(performance.now()-t0))+' ms'}
+function reset(){db={};procs={};explorer()}
+$('run').onclick=go;
+$('reset').onclick=()=>{reset();last=[{msg:'Alle Tabellen und Prozeduren wurden gelöscht.'}];tab=2;show();$('st').textContent='Zurückgesetzt'};
+$('t1').onclick=()=>{tab=1;show()};$('t2').onclick=()=>{tab=2;show()};
+$('sql').addEventListener('keydown',e=>{if(e.key=='F5'||(e.key=='Enter'&&(e.ctrlKey||e.metaKey))){e.preventDefault();go()}});
+document.addEventListener('keydown',e=>{if(e.key=='F5'){e.preventDefault();go()}});
+$('explorer').onclick=e=>{const d=e.target.dataset||{};if(d.t){$('sql').value='SELECT * FROM '+d.t+';';go()}else if(d.p){const q=procs[d.p.toLowerCase()];$('sql').value='EXEC '+q.name+(q.ps.length?' '+q.ps.map(a=>a.n+' = NULL').join(', '):'')+';';$('sql').focus()}};
+$('ex').innerHTML=Object.keys(EXAMPLES).map(k=>'<button type="button">'+esc(k)+'</button>').join('');
+$('ex').onclick=e=>{if(e.target.tagName=='BUTTON'){$('sql').value=EXAMPLES[e.target.textContent];go()}};
+reset();last=[{msg:'Noch keine Tabellen vorhanden. Lege mit CREATE TABLE deine erste Tabelle an.'}];tab=2;show();$('st').textContent='Bereit';
+</script>
+</body>
+</html>
