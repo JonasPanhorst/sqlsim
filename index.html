@@ -224,12 +224,13 @@ function parseOne(t,st){
   while(t[st.i]==';')st.i++;
   if(st.i<t.length&&t[st.i].toUpperCase()=='ELSE'){st.i++;el=parseOne(t,st)}
   return{k:'if',ct,th,el}}
- if(k=='CREATE'&&/^PROC(EDURE)?$/.test((t[st.i+1]||'').toUpperCase())){
-  st.i+=2;const hs=st.i;
+ const u1=(t[st.i+1]||'').toUpperCase(),u2=(t[st.i+2]||'').toUpperCase(),u3=(t[st.i+3]||'').toUpperCase(),isP=x=>/^PROC(EDURE)?$/.test(x),oa=k=='CREATE'&&u1=='OR'&&u2=='ALTER'&&isP(u3),al=k=='ALTER'&&isP(u1);
+ if((k=='CREATE'&&isP(u1))||oa||al){
+  st.i+=oa?4:2;const repl=oa||al,hs=st.i;
   while(st.i<t.length&&t[st.i].toUpperCase()!='AS')st.i++;
   if(st.i>=t.length)throw new Error('Falsche Syntax: Nach dem Prozedurkopf fehlt AS.');
   const h=t.slice(hs,st.i);st.i++;
-  return{k:'proc',h,body:parseStmts(t,st,false)}}
+  return{k:'proc',h,repl,al,body:parseStmts(t,st,false)}}
  const s=st.i;let d=0;
  while(st.i<t.length){const u=t[st.i].toUpperCase();if(u=='(')d++;else if(u==')')d--;else if(d==0&&(u==';'||u=='ELSE'||u=='END'))break;st.i++}
  if(st.i==s)throw new Error('Falsche Syntax in der Nähe von „'+t[s]+'“.');
@@ -239,7 +240,7 @@ function run(n,out){
  else if(n.k=='if'){const v=new P(n.ct).or()({});if(v)run(n.th,out);else if(n.el)run(n.el,out)}
  else if(n.k=='proc'){
   const p=new P(n.h),nm=strip(p.nx()).replace(/^dbo\./i,'');
-  if(procs[nm.toLowerCase()])throw new Error('In der Datenbank ist bereits ein Objekt mit dem Namen „'+nm+'“ vorhanden.');
+  const pk=nm.toLowerCase();if(n.al&&!procs[pk])throw new Error('Die Prozedur „'+nm+'“ kann nicht geändert werden, da sie nicht vorhanden ist.');if(procs[pk]&&!n.repl)throw new Error('In der Datenbank ist bereits ein Objekt mit dem Namen „'+nm+'“ vorhanden.');
   const ps=[];
   while(p.pk()!==undefined){const pn=p.nx();if(pn[0]!='@')throw new Error('Falsche Syntax in der Nähe von „'+pn+'“. Parametername mit @ erwartet.');
    p.nx();if(p.pk()=='('){let q;do{q=p.nx()}while(q!==')'&&q!==undefined)}
